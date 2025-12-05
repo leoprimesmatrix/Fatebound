@@ -73,3 +73,13 @@ export interface GameState {
 }
 
 export type ViewState = 'LOBBY' | 'CHAMPION_SELECT' | 'DECK_BUILDER' | 'BATTLE' | 'ONLINE_LOBBY';
+
+// Online Networking Types
+export interface NetworkMessage {
+  type: 'HANDSHAKE' | 'PLAY_CARD' | 'USE_ABILITY' | 'END_TURN';
+  payload?: any;
+}
+
+export interface HandshakePayload {
+  champion: Champion;
+}

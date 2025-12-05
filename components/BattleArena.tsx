@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Champion, Card, GameState, PlayerState, CardType, Realm } from '../types';
+import { Champion, Card, GameState, PlayerState, CardType, Realm, NetworkMessage } from '../types';
 import { REALM_COLORS, CHAMPIONS, CARDS } from '../constants';
 import { generateBattleCommentary, getTacticalTip } from '../services/geminiService';
-import { Heart, Shield, Zap, Sword, RefreshCw, MessageSquare, Skull, HelpCircle, X, ChevronsUp, Layers, Info, Flame, Snowflake, Cpu, Trees } from 'lucide-react';
+import { Heart, Shield, Zap, Sword, RefreshCw, MessageSquare, Skull, HelpCircle, X, ChevronsUp, Layers, Info, Flame, Snowflake, Cpu, Trees, Wifi, WifiOff } from 'lucide-react';
+import { DataConnection } from 'peerjs';
 
 interface BattleArenaProps {
   champion: Champion;
   playerDeck: Card[];
   onEndGame: (winner: 'player' | 'opponent') => void;
   isOnline?: boolean;
+  connection?: DataConnection;
+  opponentChampion?: Champion;
 }
 
 // SFX Configuration
@@ -21,7 +24,7 @@ const SFX = {
   TURN: 'https://assets.mixkit.co/active_storage/sfx/1122/1122-preview.mp3',
   VICTORY: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3',
   DEFEAT: 'https://assets.mixkit.co/active_storage/sfx/2020/2020-preview.mp3',
-  HOVER: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3', // Reusing play for subtle click
+  HOVER: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3', 
   CLICK: 'https://assets.mixkit.co/active_storage/sfx/2570/2570-preview.mp3',
   ABILITY: 'https://assets.mixkit.co/active_storage/sfx/1469/1469-preview.mp3'
 };
@@ -29,7 +32,7 @@ const SFX = {
 const playSfx = (key: keyof typeof SFX) => {
   const audio = new Audio(SFX[key]);
   audio.volume = key === 'HOVER' ? 0.1 : 0.3;
-  audio.play().catch(() => {}); // Ignore interaction errors
+  audio.play().catch(() => {}); 
 };
 
 // Helper to create initial state
@@ -46,25 +49,35 @@ const createInitialState = (champ: Champion, deck: Card[]): PlayerState => ({
   abilityUsed: false,
 });
 
-export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, onEndGame, isOnline = false }) => {
-  // Initialize Game State with a unique opponent
+export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, onEndGame, isOnline = false, connection, opponentChampion }) => {
+  // Initialize Game State
   const [gameState, setGameState] = useState<GameState>(() => {
-    // 1. Pick a random opponent that is NOT the player's champion
-    const possibleOpponents = CHAMPIONS.filter(c => c.id !== champion.id);
-    const opponentChampion = possibleOpponents[Math.floor(Math.random() * possibleOpponents.length)];
+    // Determine Opponent
+    let finalOpponent: Champion;
+    let finalOpponentDeck: Card[];
 
-    // 2. Generate a valid deck for the opponent
-    const availableCards = CARDS.filter(c => 
-      c.realm === opponentChampion.realm || Math.random() > 0.4
-    );
-    const cardPool = availableCards.length >= 8 ? availableCards : CARDS;
-    const opponentDeck = [...cardPool].sort(() => Math.random() - 0.5).slice(0, 8);
+    if (isOnline && opponentChampion) {
+       finalOpponent = opponentChampion;
+       // In online, we don't know the exact deck order of opponent yet, so use a placeholder or random legal deck
+       // Visuals only:
+       finalOpponentDeck = Array(8).fill(CARDS[0]); 
+    } else {
+        // AI Logic
+        const possibleOpponents = CHAMPIONS.filter(c => c.id !== champion.id);
+        finalOpponent = possibleOpponents[Math.floor(Math.random() * possibleOpponents.length)];
+        
+        const availableCards = CARDS.filter(c => 
+            c.realm === finalOpponent.realm || Math.random() > 0.4
+        );
+        const cardPool = availableCards.length >= 8 ? availableCards : CARDS;
+        finalOpponentDeck = [...cardPool].sort(() => Math.random() - 0.5).slice(0, 8);
+    }
 
     return {
       player: createInitialState(champion, playerDeck),
-      opponent: createInitialState(opponentChampion, opponentDeck),
+      opponent: createInitialState(finalOpponent, finalOpponentDeck),
       turn: 1,
-      isPlayerTurn: true,
+      isPlayerTurn: true, // Default to true, in real online we might flip a coin
       battleLog: ['Battle Started!'],
       winner: null,
       lastPlayedCard: null,
@@ -80,9 +93,28 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
   const [hoveredCard, setHoveredCard] = useState<Card | null>(null);
   const [screenFlash, setScreenFlash] = useState<string | null>(null);
 
-  // Ref to access state inside async loops without stale closures
   const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
+  // Handle Online Incoming Data
+  useEffect(() => {
+    if (isOnline && connection) {
+      connection.on('data', (data: any) => {
+        const msg = data as NetworkMessage;
+        
+        if (msg.type === 'PLAY_CARD') {
+           const card = msg.payload as Card;
+           playCard(card, 'opponent');
+        }
+        if (msg.type === 'USE_ABILITY') {
+           castAbility('opponent');
+        }
+        if (msg.type === 'END_TURN') {
+           endTurn();
+        }
+      });
+    }
+  }, [isOnline, connection]);
 
   // Sound Effect Triggers
   const prevPlayerHandSize = useRef(0);
@@ -140,10 +172,11 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
     return { ...state, deck: newDeck, hand: newHand };
   };
 
-  // Initialize Game
   useEffect(() => {
     setGameState(prev => {
       const p = drawCard(prev.player, 3);
+      // If online, we don't simulate opponent draw logic for hand visuals perfectly, 
+      // but we need them to have cards to represent the UI
       const o = drawCard(prev.opponent, 3);
       return { ...prev, player: p, opponent: o };
     });
@@ -153,11 +186,16 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
 
   const endTurn = useCallback(() => {
     playSfx('TURN');
+    
+    // Online Sync
+    if (isOnline && connection && gameStateRef.current.isPlayerTurn) {
+        connection.send({ type: 'END_TURN' });
+    }
+
     setGameState(prev => {
       const nextTurnNum = prev.isPlayerTurn ? prev.turn : prev.turn + 1;
       const nextIsPlayer = !prev.isPlayerTurn;
       const activeEntityKey = nextIsPlayer ? 'player' : 'opponent';
-      const prevEntityKey = nextIsPlayer ? 'opponent' : 'player';
       
       let nextState = { ...prev };
       nextState.turn = nextTurnNum;
@@ -172,29 +210,30 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
         maxMana: newMaxMana,
         mana: newMaxMana,
         shield: 0, 
-        abilityUsed: false, // Reset ability usage for the new active player
+        abilityUsed: false,
       };
 
-      // Ensure previous player's ability flag is also reset? No, abilityUsed is per turn.
-      // We just reset it when it becomes their turn.
-      
       nextState[activeEntityKey] = drawCard(nextState[activeEntityKey], 1);
       nextState.battleLog = [...nextState.battleLog, `${nextIsPlayer ? "Player's" : "Opponent's"} Turn`];
 
       return nextState;
     });
     
-    // Show banner
     const nextIsPlayer = !gameStateRef.current.isPlayerTurn;
     setShowTurnBanner(nextIsPlayer ? 'player' : 'opponent');
-    setTimeout(() => setShowTurnBanner(null), 1200); // Fast banner
-  }, []);
+    setTimeout(() => setShowTurnBanner(null), 1200);
+  }, [isOnline, connection]);
 
   // --- Ability Logic ---
   const castAbility = async (user: 'player' | 'opponent') => {
     playSfx('ABILITY');
     const opponentKey = user === 'player' ? 'opponent' : 'player';
     
+    // Online Sync
+    if (isOnline && user === 'player' && connection) {
+        connection.send({ type: 'USE_ABILITY' });
+    }
+
     setGameState(prev => {
       const activeChar = prev[user];
       const targetChar = prev[opponentKey];
@@ -212,25 +251,19 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
         battleLog: [...prev.battleLog, `${user === 'player' ? 'You' : 'Opponent'} used ${ability.name}!`]
       };
 
-      // Ability Effects based on Champion Name or Ability Name
-      // We'll use simple string matching for now
-      if (ability.name === 'Inferno' || ability.name.includes('damage')) {
-         // Fire: Deal 3 dmg
+      if (ability.name.includes('Inferno') || ability.name.includes('damage')) {
          triggerFlash('damage');
          addFloatingText('-3', '#ef4444', user === 'player' ? 80 : 20, 30);
          newState[opponentKey].health = Math.max(0, targetChar.health - 3);
-      } else if (ability.name === 'Glacial Wall' || ability.name.includes('Shield')) {
-         // Ice: Gain 4 shield
+      } else if (ability.name.includes('Glacial') || ability.name.includes('Shield')) {
          triggerFlash('shield');
          addFloatingText('+4 Shield', '#0ea5e9', user === 'player' ? 20 : 80, 50);
          newState[user].shield += 4;
-      } else if (ability.name === 'Regrowth' || ability.name.includes('Heal')) {
-         // Forest: Heal 3
+      } else if (ability.name.includes('Regrowth') || ability.name.includes('Heal')) {
          triggerFlash('heal');
          addFloatingText('+3 HP', '#22c55e', user === 'player' ? 20 : 80, 50);
          newState[user].health = Math.min(activeChar.maxHealth, activeChar.health + 3);
-      } else if (ability.name === 'Overclock' || ability.name.includes('Draw')) {
-         // Tech: Draw 2
+      } else if (ability.name.includes('Overclock') || ability.name.includes('Draw')) {
          playSfx('BUFF');
          addFloatingText('+2 Cards', '#a855f7', user === 'player' ? 20 : 80, 50);
          newState[user] = drawCard(newState[user], 2);
@@ -239,7 +272,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
       return newState;
     });
 
-    await new Promise(r => setTimeout(r, 600)); // Pause for effect
+    await new Promise(r => setTimeout(r, 600)); 
   };
 
   const playCard = async (card: Card, user: 'player' | 'opponent') => {
@@ -248,7 +281,11 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
     playSfx('PLAY');
     const opponentKey = user === 'player' ? 'opponent' : 'player';
 
-    // 1. Pay Cost & Move Card
+    // Online Sync
+    if (isOnline && user === 'player' && connection) {
+        connection.send({ type: 'PLAY_CARD', payload: card });
+    }
+
     setGameState(prev => {
       const newHand = prev[user].hand.filter(c => c.id !== card.id);
       return {
@@ -263,10 +300,8 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
       };
     });
 
-    // 2. Faster Animation Wait (Significantly reduced from 1200ms)
     await new Promise(r => setTimeout(r, 600));
 
-    // 3. Apply Effects & Commentary
     let flavor = "";
     try {
         flavor = await generateBattleCommentary(card.name, card.realm, user === 'player');
@@ -277,16 +312,13 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
       const activeChar = newState[user];
       const targetChar = newState[opponentKey];
 
-      // Trigger Visuals based on Realm
       triggerFlash(card.realm);
 
-      // Effect Logic
       let damage = 0;
       let heal = 0;
       let shield = 0;
       let manaGain = 0;
 
-      // Parsing Logic
       if (card.type === CardType.ATTACK || card.type === CardType.MINION || (card.type === CardType.SPELL && card.description.toLowerCase().includes('dmg'))) {
         damage = card.value;
       } 
@@ -298,17 +330,13 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
         if (card.type === CardType.WEAPON && card.description.includes('Atk')) damage = card.value; 
       }
       
-      // Fallback if parsing fails but value exists
       if (damage === 0 && heal === 0 && shield === 0 && manaGain === 0) {
           if (card.type === CardType.ATTACK) damage = card.value;
       }
 
-      // Apply Damage
       if (damage > 0) {
         playSfx('ATTACK');
         triggerShake(opponentKey);
-        
-        // Trigger Flash based on who took damage
         if (opponentKey === 'player') triggerFlash('damage');
         else triggerFlash('impact');
 
@@ -327,7 +355,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
         if (actualDmg > 0) addFloatingText(`-${actualDmg}`, '#ef4444', user === 'player' ? 80 : 20, 30);
       }
 
-      // Apply Heal
       if (heal > 0) {
         playSfx('BUFF');
         triggerFlash('heal');
@@ -335,7 +362,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
         addFloatingText(`+${heal}`, '#22c55e', user === 'player' ? 20 : 80, 60);
       }
 
-      // Apply Shield
       if (shield > 0) {
         playSfx('BUFF');
         triggerFlash('shield');
@@ -343,14 +369,12 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
         addFloatingText(`+${shield}`, '#0ea5e9', user === 'player' ? 20 : 80, 60);
       }
       
-      // Apply Mana
       if (manaGain > 0) {
           playSfx('BUFF');
           activeChar.mana = Math.min(10, activeChar.mana + manaGain);
           addFloatingText(`+${manaGain} Mana`, '#3b82f6', user === 'player' ? 20 : 80, 60);
       }
 
-      // Check Win Condition
       if (newState.player.health <= 0) {
           newState.winner = 'opponent';
           playSfx('DEFEAT');
@@ -363,15 +387,16 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
       return newState;
     });
     
-    // 4. Short pause after effect
     await new Promise(r => setTimeout(r, 400));
     setGameState(prev => ({ ...prev, lastPlayedCard: null }));
   };
 
-  // --- AI Logic (Sequential & Strategic) ---
+  // --- AI Logic (Sequential) ---
   const runAiTurn = async () => {
+     // Skip AI if Online
+     if (isOnline) return;
+
      setIsAiProcessing(true);
-     // Reduced initial thinking time
      await new Promise(r => setTimeout(r, 800)); 
 
      let keepPlaying = true;
@@ -382,11 +407,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
 
          const { hand, mana, health, maxHealth, abilityUsed, champion: oppChamp } = current.opponent;
          const playerHealth = current.player.health;
-
-         // Find playable cards
          const playableCards = hand.filter(c => c.cost <= mana);
-         
-         // Check if ability is playable
          const canUseAbility = !abilityUsed && mana >= oppChamp.ability.cost;
 
          if (playableCards.length === 0 && !canUseAbility) {
@@ -394,33 +415,25 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
             break;
          }
 
-         // --- Advanced AI Scoring ---
+         // AI Scoring
          let bestAction: { type: 'card', card: Card } | { type: 'ability' } | null = null;
          let bestScore = -Infinity;
 
-         // Score Cards
          playableCards.forEach(card => {
              let score = 0;
-             // 1. Efficiency
              score += card.cost * 10; 
 
-             // 2. Lethal
              let estimatedDmg = 0;
              if (card.type === CardType.ATTACK || card.type === CardType.MINION || card.description.includes('dmg')) {
                  estimatedDmg = card.value;
              }
              if (estimatedDmg >= playerHealth) score += 99999;
 
-             // 3. Survival
              const isLowHp = health < (maxHealth * 0.35); 
              const isDefensive = card.description.includes('Heal') || card.description.includes('Shield');
              if (isLowHp && isDefensive) score += 500;
              if (card.description.includes('Heal') && health === maxHealth) score -= 1000;
 
-             // 4. Aggression
-             if (playerHealth < 12 && estimatedDmg > 0) score += 100;
-
-             // 5. Mana Efficiency
              const remainingManaAfterPlay = mana - card.cost;
              if (remainingManaAfterPlay === 0) score += 50;
 
@@ -430,31 +443,13 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
              }
          });
 
-         // Score Ability
          if (canUseAbility) {
              let abilityScore = 0;
              const cost = oppChamp.ability.cost;
-             abilityScore += cost * 10; // Baseline efficiency
-             
-             // Analyze ability type loosely
-             const name = oppChamp.ability.name;
-             if (name.includes('Inferno')) { // Dmg
-                 if (3 >= playerHealth) abilityScore += 99999;
-                 else abilityScore += 40;
-             } else if (name.includes('Glacial')) { // Shield
-                 if (health < maxHealth * 0.5) abilityScore += 200;
-                 else abilityScore += 20;
-             } else if (name.includes('Regrowth')) { // Heal
-                 if (health < maxHealth - 5) abilityScore += 300;
-                 else abilityScore -= 500;
-             } else if (name.includes('Overclock')) { // Draw
-                 if (hand.length < 3) abilityScore += 200; // Need cards
-                 else abilityScore += 30;
-             }
-
-             // Mana efficiency check for ability
+             abilityScore += cost * 10;
              if (mana - cost === 0) abilityScore += 50;
 
+             // Prioritize usage if no cards played yet or extra mana
              if (abilityScore > bestScore) {
                  bestAction = { type: 'ability' };
              }
@@ -466,7 +461,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
             } else {
                 await castAbility('opponent');
             }
-            // Faster pause between multiple actions
             await new Promise(r => setTimeout(r, 600)); 
          } else {
              keepPlaying = false;
@@ -479,7 +473,10 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
 
   useEffect(() => {
     if (!gameState.isPlayerTurn && !gameState.winner && !isAiProcessing) {
-        runAiTurn();
+        // Only run AI if NOT online
+        if (!isOnline) {
+            runAiTurn();
+        }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState.isPlayerTurn]); 
@@ -507,10 +504,8 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                : 'border-slate-600 bg-slate-900 grayscale-[0.5] opacity-80 cursor-not-allowed'}
        `}
     >
-        {/* Card Background Gradient */}
         <div className={`absolute inset-0 bg-gradient-to-br ${REALM_COLORS[card.realm]} opacity-30`} />
         
-        {/* Card Header */}
         <div className="relative z-10 p-2 flex justify-between items-start">
             <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-lg shadow-md ${isPlayable ? 'bg-slate-900 border-blue-400 text-blue-100' : 'bg-slate-800 border-slate-500 text-slate-400'}`} title="Mana Cost">
                 {card.cost}
@@ -521,7 +516,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
             {card.type === CardType.WEAPON && <Sword className="w-5 h-5 text-amber-400 drop-shadow" />}
         </div>
         
-        {/* Card Image Area (Icon) */}
         <div className="absolute inset-0 top-8 bottom-16 flex items-center justify-center z-0">
              <div className="bg-black/30 p-4 rounded-full backdrop-blur-sm">
                 {card.realm === Realm.FIRE && <Flame className="w-12 h-12 text-orange-500/80" />}
@@ -531,7 +525,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
              </div>
         </div>
 
-        {/* Card Footer */}
         <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black via-black/80 to-transparent z-10 h-[45%] flex flex-col justify-end">
             <div className="font-bold text-sm text-white leading-tight mb-1 drop-shadow-md text-center">{card.name}</div>
             <div className="text-[10px] text-slate-300 leading-tight text-center font-medium line-clamp-2">{card.description}</div>
@@ -554,65 +547,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                 exit={{ opacity: 0 }}
                 className={`fixed inset-0 z-[150] pointer-events-none ${screenFlash}`}
             />
-        )}
-      </AnimatePresence>
-
-      {/* --- TUTORIAL MODAL --- */}
-      <AnimatePresence>
-        {showTutorial && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-              className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full shadow-2xl overflow-hidden"
-            >
-              <div className="p-6 bg-slate-800 border-b border-slate-700 flex justify-between items-center">
-                <h2 className="text-3xl font-cinzel font-bold text-white flex items-center gap-3">
-                  <HelpCircle className="w-8 h-8 text-amber-500" /> How to Play
-                </h2>
-                <button onClick={() => setShowTutorial(false)} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
-              </div>
-              <div className="p-8 grid md:grid-cols-2 gap-8">
-                <div>
-                   <h3 className="text-amber-400 font-bold uppercase tracking-wider mb-4 flex items-center gap-2"><Sword className="w-5 h-5" /> The Objective</h3>
-                   <p className="text-slate-300 mb-6">Reduce the Enemy Champion's <span className="text-red-400 font-bold">Health</span> to zero before they defeat you.</p>
-
-                   <h3 className="text-blue-400 font-bold uppercase tracking-wider mb-4 flex items-center gap-2"><Zap className="w-5 h-5" /> Mana & Turns</h3>
-                   <p className="text-slate-300 mb-2">You gain <span className="text-blue-400 font-bold">Mana</span> every turn (up to 10).</p>
-                   <ul className="list-disc list-inside text-slate-400 space-y-1 mb-6">
-                     <li>Cards cost Mana to play (top-left number).</li>
-                     <li>If a card glows, you can play it.</li>
-                     <li>Click "End Turn" when you are done.</li>
-                   </ul>
-                </div>
-                <div>
-                   <h3 className="text-purple-400 font-bold uppercase tracking-wider mb-4 flex items-center gap-2"><Shield className="w-5 h-5" /> Card Types</h3>
-                   <div className="space-y-3">
-                     <div className="flex items-center gap-3 bg-slate-800 p-2 rounded-lg border border-slate-700">
-                        <Sword className="w-5 h-5 text-red-400" />
-                        <span className="text-slate-200 text-sm"><strong>Attack:</strong> Deals damage to the enemy.</span>
-                     </div>
-                     <div className="flex items-center gap-3 bg-slate-800 p-2 rounded-lg border border-slate-700">
-                        <Shield className="w-5 h-5 text-cyan-400" />
-                        <span className="text-slate-200 text-sm"><strong>Spell/Shield:</strong> Blocks incoming damage.</span>
-                     </div>
-                     <div className="flex items-center gap-3 bg-slate-800 p-2 rounded-lg border border-slate-700">
-                        <Skull className="w-5 h-5 text-green-400" />
-                        <span className="text-slate-200 text-sm"><strong>Minion:</strong> Summons allies for damage/effects.</span>
-                     </div>
-                   </div>
-                   
-                   <div className="mt-8">
-                     <button onClick={() => setShowTutorial(false)} className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg uppercase tracking-wider transition-colors">
-                        Got it, Let's Fight!
-                     </button>
-                   </div>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
         )}
       </AnimatePresence>
 
@@ -678,7 +612,10 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                      </div>
                  </div>
                  <div>
-                     <div className="text-red-400 font-bold text-2xl drop-shadow-sm font-cinzel">{isOnline ? 'Player 2' : gameState.opponent.champion.name}</div>
+                     <div className="flex items-center gap-2 text-red-400 font-bold text-2xl drop-shadow-sm font-cinzel">
+                        {gameState.opponent.champion.name}
+                        {isOnline && <Wifi className="w-4 h-4 text-green-500" />}
+                     </div>
                      <div className="flex items-center gap-4 text-white mt-1">
                         <div className="flex items-center gap-2 bg-red-950/80 px-3 py-1 rounded-lg border border-red-500/30" title="Enemy Health">
                             <Heart className="w-5 h-5 text-red-500 fill-current" /> 
@@ -697,12 +634,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
              {/* Opponent Hand & Mana */}
              <div className="flex flex-col items-end gap-2">
                  <div className="flex items-center gap-4">
-                    {/* Opponent Deck Pile */}
-                    <div className="relative w-16 h-24 bg-slate-800 rounded border border-slate-600 shadow-xl flex items-center justify-center">
-                        <div className="absolute inset-1 border border-slate-600 rounded opacity-50" />
-                        <Layers className="text-slate-500 w-6 h-6" />
-                        <div className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center border border-black">{gameState.opponent.deck.length}</div>
-                    </div>
                     {/* Hand */}
                     <div className="flex gap-1">
                         {[...Array(gameState.opponent.hand.length)].map((_, i) => (
@@ -735,7 +666,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
              ))}
          </div>
 
-         {/* Center Arena - Card Resolution Zone */}
+         {/* Center Arena */}
          <div className="relative w-full max-w-lg h-64 flex items-center justify-center">
             <AnimatePresence mode="wait">
                 {gameState.lastPlayedCard && (
@@ -746,7 +677,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                         exit={{ scale: 1.5, opacity: 0, filter: 'blur(10px)' }}
                         className="relative z-50"
                     >
-                        {/* Simplified Large Card View for Resolution */}
                         <div className={`w-48 h-64 rounded-xl shadow-[0_0_50px_rgba(255,255,255,0.3)] bg-slate-800 border-4 border-white flex flex-col items-center justify-center relative overflow-hidden`}>
                              <div className={`absolute inset-0 bg-gradient-to-br ${REALM_COLORS[gameState.lastPlayedCard.realm]} opacity-50`} />
                              <h3 className="relative z-10 text-2xl font-bold text-white text-center px-2 drop-shadow-md">{gameState.lastPlayedCard.name}</h3>
@@ -798,7 +728,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                         <div className="w-24 h-24 rounded-full border-4 border-amber-500 overflow-hidden bg-slate-800 shadow-[0_0_20px_rgba(245,158,11,0.3)]">
                             <img src={gameState.player.champion.image} className="w-full h-full object-cover" alt="Me" />
                         </div>
-                        {/* Mana Indicator on Portrait */}
                         <div className="absolute -bottom-3 -right-3 bg-blue-950/90 w-10 h-10 rounded-full border-2 border-blue-400 flex items-center justify-center text-blue-100 font-bold shadow-lg" title="Current Mana">
                            {gameState.player.mana}
                         </div>
@@ -821,7 +750,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                      </div>
                  </div>
                  
-                 {/* Ability Button */}
                  <button
                     disabled={gameState.player.abilityUsed || gameState.player.mana < gameState.player.champion.ability.cost || !gameState.isPlayerTurn}
                     onClick={() => castAbility('player')}
@@ -839,9 +767,8 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                  </button>
              </div>
 
-             {/* Player Hand & Tooltip */}
+             {/* Player Hand */}
              <div className="flex-1 flex justify-center -mb-20 perspective-[1000px] hover:-mb-4 transition-all duration-300 relative">
-                 {/* Card Tooltip */}
                  <AnimatePresence>
                    {hoveredCard && (
                      <motion.div
@@ -863,7 +790,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                    )}
                  </AnimatePresence>
 
-                 {/* Hand */}
                  <div className="flex gap-[-2rem] items-end px-12 pb-24 hover:gap-2 transition-all duration-300">
                     <AnimatePresence>
                     {gameState.player.hand.map((card, idx) => {
@@ -878,9 +804,9 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                  </div>
              </div>
 
-             {/* Controls & Mana & Deck */}
+             {/* Controls */}
              <div className="flex flex-col gap-4 items-end min-w-[220px]">
-                 {gameState.isPlayerTurn && tacticalTip && (
+                 {gameState.isPlayerTurn && tacticalTip && !isOnline && (
                      <motion.div initial={{opacity:0, x:20}} animate={{opacity:1, x:0}} className="bg-indigo-900/90 p-3 rounded-l-xl border-r-4 border-indigo-400 text-xs text-indigo-100 max-w-[200px] shadow-lg backdrop-blur-sm">
                         <div className="flex items-center gap-2 mb-1 font-bold text-indigo-300 uppercase tracking-wider">
                             <MessageSquare className="w-3 h-3" /> Advisor
@@ -888,15 +814,6 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                         {tacticalTip}
                     </motion.div>
                  )}
-
-                 {/* Deck Pile Visual */}
-                 <div className="flex items-center gap-4 self-end mr-2">
-                    <div className="relative w-16 h-24 bg-slate-800 rounded border border-slate-600 shadow-xl flex items-center justify-center group cursor-pointer hover:border-amber-500/50 transition-colors">
-                        <div className="absolute inset-1 border border-slate-600 rounded opacity-50" />
-                        <Layers className="text-slate-500 w-6 h-6 group-hover:text-amber-500 transition-colors" />
-                        <div className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center border border-black">{gameState.player.deck.length}</div>
-                    </div>
-                 </div>
 
                  <div className="flex items-center gap-2 bg-black/60 p-3 rounded-full backdrop-blur-md border border-white/10" title="Available Mana">
                     <div className="mr-1 text-xs font-bold text-blue-400 uppercase tracking-widest">Mana</div>

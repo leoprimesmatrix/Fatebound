@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { ViewState, Champion, Card } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { ViewState, Champion, Card, NetworkMessage, HandshakePayload } from './types';
 import { ChampionSelect } from './components/ChampionSelect';
 import { DeckBuilder } from './components/DeckBuilder';
 import { BattleArena } from './components/BattleArena';
 import { CHAMPIONS } from './constants';
-import { Sword, LayoutGrid, User, Shield, Globe, Users, Copy, ArrowRight, Loader2 } from 'lucide-react';
+import { Sword, LayoutGrid, User, Shield, Globe, Users, Copy, ArrowRight, Loader2, Wifi } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Peer, { DataConnection } from 'peerjs';
 
 // Global Background Component
 const GlobalBackground = () => (
@@ -30,31 +31,90 @@ const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('LOBBY');
   const [selectedChampion, setSelectedChampion] = useState<Champion | null>(null);
   const [playerDeck, setPlayerDeck] = useState<Card[]>([]);
-  const [onlineCode, setOnlineCode] = useState("");
+  const [isOnlineMode, setIsOnlineMode] = useState(false);
+  
+  // Online State
+  const [peer, setPeer] = useState<Peer | null>(null);
+  const [connection, setConnection] = useState<DataConnection | null>(null);
+  const [opponentChampion, setOpponentChampion] = useState<Champion | null>(null);
 
   // Online Lobby Component
   const OnlineLobby = () => {
     const [mode, setMode] = useState<'HOST' | 'JOIN'>('HOST');
-    const [generatedCode, setGeneratedCode] = useState("X9D2A"); // Mock code
+    const [myId, setMyId] = useState("");
     const [joinCode, setJoinCode] = useState("");
-    const [status, setStatus] = useState<'IDLE' | 'CONNECTING' | 'CONNECTED'>('IDLE');
+    const [status, setStatus] = useState<'IDLE' | 'CONNECTING' | 'WAITING' | 'CONNECTED'>('IDLE');
+    const [error, setError] = useState("");
 
-    const handleConnect = () => {
+    // Initialize Peer for Host
+    useEffect(() => {
+      if (mode === 'HOST' && !peer) {
+        setStatus('WAITING');
+        const newPeer = new Peer();
+        
+        newPeer.on('open', (id) => {
+          setMyId(id);
+          setPeer(newPeer);
+        });
+
+        newPeer.on('connection', (conn) => {
+          setConnection(conn);
+          setStatus('CONNECTED');
+          setupConnection(conn);
+        });
+
+        newPeer.on('error', (err) => setError("Connection Error: " + err.message));
+        
+        return () => newPeer.destroy();
+      }
+    }, [mode]);
+
+    const handleJoin = () => {
+      if (!joinCode) return;
       setStatus('CONNECTING');
-      // Simulate connection delay
-      setTimeout(() => {
-        setStatus('CONNECTED');
-        // Simulate game start
-        setTimeout(() => {
-          // Launch a battle with "Online" flag
-          const randomChamp = CHAMPIONS[0]; // Default for online demo
-          setSelectedChampion(randomChamp); // Mock selection
-          setPlayerDeck([]); // Will need default deck logic if skipped
-          // Actually, for demo, let's just go to Champion Select but "Online"
-          // Or better, just launch a game against AI named "Player 2"
-          handleChampionSelect(randomChamp); // This moves to Deck Builder
-        }, 1500);
-      }, 2000);
+      
+      const newPeer = new Peer();
+      setPeer(newPeer);
+
+      newPeer.on('open', () => {
+        const conn = newPeer.connect(joinCode);
+        
+        conn.on('open', () => {
+          setConnection(conn);
+          setStatus('CONNECTED');
+          setupConnection(conn);
+        });
+        
+        conn.on('error', (err) => {
+          setError("Failed to connect to host.");
+          setStatus('IDLE');
+        });
+      });
+      
+      newPeer.on('error', (err) => {
+        setError("Network Error");
+        setStatus('IDLE');
+      });
+    };
+
+    const setupConnection = (conn: DataConnection) => {
+      // Wait for handshake
+      conn.on('data', (data: any) => {
+        if (data.type === 'HANDSHAKE') {
+          const payload = data.payload as HandshakePayload;
+          setOpponentChampion(payload.champion);
+          // Wait a moment for visual effect then start
+          setTimeout(() => setView('BATTLE'), 1000);
+        }
+      });
+
+      // Send my handshake
+      if (selectedChampion) {
+        conn.send({
+          type: 'HANDSHAKE',
+          payload: { champion: selectedChampion }
+        });
+      }
     };
 
     return (
@@ -64,18 +124,18 @@ const App: React.FC = () => {
           className="bg-slate-900/80 backdrop-blur-xl p-8 rounded-3xl border border-slate-700 shadow-2xl max-w-md w-full"
         >
           <h2 className="text-3xl font-cinzel font-bold text-white mb-6 flex items-center justify-center gap-3">
-            <Globe className="w-8 h-8 text-blue-400" /> Online Play
+            <Globe className="w-8 h-8 text-blue-400" /> Online Lobby
           </h2>
           
           <div className="flex bg-slate-800 rounded-lg p-1 mb-8">
             <button 
-              onClick={() => setMode('HOST')}
+              onClick={() => { setMode('HOST'); setPeer(null); setStatus('IDLE'); setError(''); }}
               className={`flex-1 py-2 rounded-md font-bold transition-all ${mode === 'HOST' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
             >
               Host Game
             </button>
             <button 
-              onClick={() => setMode('JOIN')}
+              onClick={() => { setMode('JOIN'); setPeer(null); setStatus('IDLE'); setError(''); }}
               className={`flex-1 py-2 rounded-md font-bold transition-all ${mode === 'JOIN' ? 'bg-slate-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
             >
               Join Game
@@ -83,23 +143,38 @@ const App: React.FC = () => {
           </div>
 
           <div className="min-h-[200px] flex flex-col justify-center">
-             {status === 'CONNECTING' ? (
-               <div className="flex flex-col items-center gap-4 text-slate-300">
-                 <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
-                 <p>Connecting to server...</p>
-               </div>
-             ) : status === 'CONNECTED' ? (
-                <div className="text-green-400 font-bold text-xl animate-pulse">
-                  Opponent Found! Starting...
+             {error && (
+                <div className="bg-red-500/20 text-red-300 p-3 rounded-lg mb-4 text-sm font-bold border border-red-500/50">
+                  {error}
+                </div>
+             )}
+
+             {status === 'CONNECTED' ? (
+                <div className="flex flex-col items-center gap-4">
+                  <Wifi className="w-16 h-16 text-green-400 animate-pulse" />
+                  <div className="text-green-400 font-bold text-xl">
+                    Connected! Synchronizing...
+                  </div>
                 </div>
              ) : (
                <>
                  {mode === 'HOST' ? (
                    <div className="space-y-4">
-                     <p className="text-slate-400 text-sm">Share this code with your friend:</p>
-                     <div className="flex items-center gap-2 bg-black/40 p-4 rounded-xl border border-slate-600">
-                       <span className="text-4xl font-mono font-bold text-amber-400 tracking-widest flex-1">{generatedCode}</span>
-                       <button className="p-2 hover:bg-slate-700 rounded-lg text-slate-400"><Copy className="w-5 h-5" /></button>
+                     <p className="text-slate-400 text-sm">Share this ID with your friend:</p>
+                     <div className="flex items-center gap-2 bg-black/40 p-4 rounded-xl border border-slate-600 relative overflow-hidden">
+                       {myId ? (
+                         <>
+                           <span className="text-xl font-mono font-bold text-amber-400 flex-1 break-all">{myId}</span>
+                           <button 
+                             onClick={() => navigator.clipboard.writeText(myId)}
+                             className="p-2 hover:bg-slate-700 rounded-lg text-slate-400"
+                            >
+                             <Copy className="w-5 h-5" />
+                           </button>
+                         </>
+                       ) : (
+                         <div className="flex w-full justify-center"><Loader2 className="animate-spin text-amber-500" /></div>
+                       )}
                      </div>
                      <div className="flex items-center justify-center gap-2 text-slate-500 text-sm animate-pulse">
                        <Loader2 className="w-4 h-4 animate-spin" /> Waiting for opponent...
@@ -107,21 +182,20 @@ const App: React.FC = () => {
                    </div>
                  ) : (
                    <div className="space-y-4">
-                     <p className="text-slate-400 text-sm">Enter the code from your friend:</p>
+                     <p className="text-slate-400 text-sm">Enter Host ID:</p>
                      <input 
                        type="text" 
                        value={joinCode}
-                       onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                       placeholder="ENTER CODE"
-                       className="w-full bg-black/40 border border-slate-600 rounded-xl p-4 text-center text-2xl font-mono font-bold text-white focus:outline-none focus:border-blue-500 transition-colors"
-                       maxLength={5}
+                       onChange={(e) => setJoinCode(e.target.value)}
+                       placeholder="Paste Host ID Here"
+                       className="w-full bg-black/40 border border-slate-600 rounded-xl p-4 text-center text-sm font-mono font-bold text-white focus:outline-none focus:border-blue-500 transition-colors"
                      />
                      <button 
-                       onClick={handleConnect}
-                       disabled={joinCode.length < 5}
+                       onClick={handleJoin}
+                       disabled={!joinCode || status === 'CONNECTING'}
                        className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2"
                      >
-                       Connect <ArrowRight className="w-5 h-5" />
+                       {status === 'CONNECTING' ? <Loader2 className="animate-spin" /> : <>Connect <ArrowRight className="w-5 h-5" /></>}
                      </button>
                    </div>
                  )}
@@ -129,9 +203,7 @@ const App: React.FC = () => {
              )}
           </div>
           
-          {status !== 'CONNECTED' && status !== 'CONNECTING' && (
-             <button onClick={() => setView('LOBBY')} className="mt-6 text-slate-500 hover:text-white text-sm">Cancel</button>
-          )}
+          <button onClick={() => setView('LOBBY')} className="mt-6 text-slate-500 hover:text-white text-sm">Cancel</button>
         </motion.div>
       </div>
     );
@@ -140,7 +212,7 @@ const App: React.FC = () => {
   // Lobby Component
   const Lobby = () => (
     <div className="flex flex-col items-center justify-center min-h-screen text-center p-6 relative overflow-hidden">
-      {/* Background handled by GlobalBackground, just local overlays here */}
+      {/* Background handled by GlobalBackground */}
       <div className="relative z-10 max-w-3xl flex flex-col items-center">
         <motion.div
            initial={{ opacity: 0, y: -50 }}
@@ -162,7 +234,7 @@ const App: React.FC = () => {
           <motion.button 
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setView('CHAMPION_SELECT')}
+            onClick={() => { setIsOnlineMode(false); setView('CHAMPION_SELECT'); }}
             className="group relative w-full py-6 bg-amber-600 overflow-hidden rounded-lg shadow-[0_0_30px_rgba(245,158,11,0.3)] transition-all hover:shadow-[0_0_50px_rgba(245,158,11,0.6)]"
           >
             <div className="absolute inset-0 bg-gradient-to-r from-amber-500 to-yellow-500 opacity-100 group-hover:opacity-90 transition-opacity"></div>
@@ -174,7 +246,7 @@ const App: React.FC = () => {
           <motion.button 
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => setView('ONLINE_LOBBY')}
+            onClick={() => { setIsOnlineMode(true); setView('CHAMPION_SELECT'); }}
             className="group relative w-full py-6 bg-slate-800 overflow-hidden rounded-lg border border-slate-600 transition-all hover:border-blue-400"
           >
             <span className="relative text-blue-100 font-black text-xl tracking-widest uppercase flex items-center justify-center gap-3 group-hover:text-white">
@@ -193,20 +265,32 @@ const App: React.FC = () => {
 
   const handleDeckConfirm = (deck: Card[]) => {
     setPlayerDeck(deck);
-    setView('BATTLE');
+    if (isOnlineMode) {
+      setView('ONLINE_LOBBY');
+    } else {
+      setView('BATTLE');
+    }
   };
 
   const handleEndGame = (winner: 'player' | 'opponent') => {
     setView('LOBBY');
     setSelectedChampion(null);
     setPlayerDeck([]);
+    if (connection) {
+        connection.close();
+        setConnection(null);
+    }
+    if (peer) {
+        peer.destroy();
+        setPeer(null);
+    }
   };
 
   return (
     <div className="min-h-screen text-slate-100 font-sans selection:bg-amber-500/30 relative">
       <GlobalBackground />
       
-      {/* Navigation (Only show if not in Lobby) */}
+      {/* Navigation */}
       <AnimatePresence>
         {view !== 'LOBBY' && view !== 'BATTLE' && view !== 'ONLINE_LOBBY' && (
           <motion.nav 
@@ -255,7 +339,9 @@ const App: React.FC = () => {
             champion={selectedChampion} 
             playerDeck={playerDeck}
             onEndGame={handleEndGame}
-            isOnline={false} // Would be passed true if we fully implemented the online flow transition
+            isOnline={isOnlineMode}
+            connection={connection || undefined}
+            opponentChampion={opponentChampion || undefined}
           />
         )}
       </main>
