@@ -3,8 +3,13 @@ import { Realm, Card } from '../types';
 
 let ai: GoogleGenAI | null = null;
 
-if (process.env.API_KEY) {
-  ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Safe initialization that won't crash in browser/static environments
+try {
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  }
+} catch (error) {
+  console.warn("Gemini API skipped: Environment variables not accessible.");
 }
 
 // Fallback arrays for when API is unavailable or quota exceeded
