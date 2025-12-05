@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  base: './', // Critical for GitHub Pages to find assets
   build: {
     outDir: 'dist',
+    assetsDir: 'assets',
   },
-  // Ensure base is relative for GitHub Pages
-  base: './', 
 });
