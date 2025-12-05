@@ -102,7 +102,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
   useEffect(() => {
     if (gameState.player.mana > prevPlayerMana.current) {
         setManaGainAnim(true);
-        setTimeout(() => setManaGainAnim(false), 1500);
+        setTimeout(() => setManaGainAnim(false), 800);
     }
     prevPlayerMana.current = gameState.player.mana;
   }, [gameState.player.mana]);
@@ -826,35 +826,37 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                     </motion.div>
                  )}
 
-                 <div className="relative flex items-center gap-2 bg-black/60 p-3 rounded-full backdrop-blur-md border border-white/10" title="Available Mana">
+                 <div className="relative flex items-center gap-2 bg-black/60 p-3 rounded-full backdrop-blur-md border border-white/10 overflow-visible" title="Available Mana">
                     {/* Mana Gain Burst Effect */}
                     <AnimatePresence>
                         {manaGainAnim && (
                             <>
                               <motion.div 
-                                  initial={{ opacity: 0.8, scale: 0.9 }}
-                                  animate={{ opacity: 0, scale: 2 }}
+                                  initial={{ opacity: 0.8, scale: 0.8 }}
+                                  animate={{ opacity: 0, scale: 2.5 }}
                                   exit={{ opacity: 0 }}
-                                  className="absolute inset-0 bg-blue-500 rounded-full blur-xl z-[-1]"
+                                  transition={{ duration: 0.8, ease: "easeOut" }}
+                                  className="absolute inset-0 bg-blue-500 rounded-full blur-2xl z-[-1]"
                               />
                               <motion.div
-                                  initial={{ scale: 1, opacity: 0.8, borderWidth: '2px' }}
-                                  animate={{ scale: 1.5, opacity: 0, borderWidth: '0px' }}
-                                  className="absolute inset-0 border-blue-400 rounded-full pointer-events-none"
+                                  initial={{ scale: 1, opacity: 1, borderWidth: '4px' }}
+                                  animate={{ scale: 1.8, opacity: 0, borderWidth: '0px' }}
+                                  transition={{ duration: 0.6 }}
+                                  className="absolute inset-0 border-blue-400 rounded-full pointer-events-none z-0"
                               />
                             </>
                         )}
                     </AnimatePresence>
                     
-                    <div className="mr-1 text-xs font-bold text-blue-400 uppercase tracking-widest">Mana</div>
+                    <div className="mr-1 text-xs font-bold text-blue-400 uppercase tracking-widest relative z-10">Mana</div>
                     {[...Array(gameState.player.maxMana)].map((_, i) => (
-                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 relative ${i < gameState.player.mana ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] scale-110' : 'bg-slate-700'}`}>
+                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 relative z-10 ${i < gameState.player.mana ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] scale-110' : 'bg-slate-700'}`}>
                            {/* Individual Crystal Pulse on fill */}
                            {i === gameState.player.mana - 1 && manaGainAnim && (
                                <motion.div 
                                  initial={{ scale: 1, opacity: 1 }}
-                                 animate={{ scale: 2.5, opacity: 0 }}
-                                 className="absolute inset-0 rounded-full bg-white blur-sm"
+                                 animate={{ scale: 3, opacity: 0 }}
+                                 className="absolute inset-0 rounded-full bg-white blur-[1px]"
                                />
                            )}
                         </div>
