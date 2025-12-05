@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Champion, Card, GameState, PlayerState, CardType, Realm, NetworkMessage } from '../types';
 import { REALM_COLORS, CHAMPIONS, CARDS } from '../constants';
 import { generateBattleCommentary, getTacticalTip } from '../services/geminiService';
-import { Heart, Shield, Zap, Sword, RefreshCw, MessageSquare, Skull, HelpCircle, X, ChevronsUp, Layers, Info, Flame, Snowflake, Cpu, Trees, Wifi, WifiOff } from 'lucide-react';
+import { Heart, Shield, Zap, Sword, RefreshCw, MessageSquare, Skull, HelpCircle, X, ChevronsUp, Layers, Info, Flame, Snowflake, Cpu, Trees, Wifi } from 'lucide-react';
 import { DataConnection } from 'peerjs';
 
 interface BattleArenaProps {
@@ -31,7 +31,7 @@ const SFX = {
 
 const playSfx = (key: keyof typeof SFX) => {
   const audio = new Audio(SFX[key]);
-  audio.volume = key === 'HOVER' ? 0.1 : 0.3;
+  audio.volume = key === 'HOVER' ? 0.05 : 0.3;
   audio.play().catch(() => {}); 
 };
 
@@ -578,6 +578,57 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
              </h2>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* Tutorial Overlay */}
+      <AnimatePresence>
+         {showTutorial && (
+            <motion.div 
+               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+               className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+               onClick={() => setShowTutorial(false)}
+            >
+               <motion.div 
+                  initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
+                  className="bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-2xl w-full p-8 shadow-2xl relative"
+                  onClick={e => e.stopPropagation()}
+               >
+                  <button onClick={() => setShowTutorial(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white"><X /></button>
+                  <h2 className="text-3xl font-cinzel font-bold text-amber-500 mb-6 text-center">How to Play</h2>
+                  
+                  <div className="space-y-6">
+                     <div className="flex gap-4">
+                        <div className="bg-slate-800 p-3 rounded-xl h-fit"><Heart className="text-red-500" /></div>
+                        <div>
+                           <h4 className="font-bold text-white text-lg">Objective</h4>
+                           <p className="text-slate-400">Reduce the opponent's Health to 0 before they defeat you.</p>
+                        </div>
+                     </div>
+                     <div className="flex gap-4">
+                        <div className="bg-slate-800 p-3 rounded-xl h-fit"><Zap className="text-blue-500" /></div>
+                        <div>
+                           <h4 className="font-bold text-white text-lg">Mana & Cards</h4>
+                           <p className="text-slate-400">You gain Mana each turn. Cards cost Mana to play. Use your Mana wisely to deploy minions, cast spells, or equip weapons.</p>
+                        </div>
+                     </div>
+                     <div className="flex gap-4">
+                        <div className="bg-slate-800 p-3 rounded-xl h-fit"><Layers className="text-purple-500" /></div>
+                        <div>
+                           <h4 className="font-bold text-white text-lg">Turns</h4>
+                           <p className="text-slate-400">Draw 1 card each turn. You can play as many cards as your Mana allows. Click "End Turn" when finished.</p>
+                        </div>
+                     </div>
+                  </div>
+                  
+                  <button 
+                     onClick={() => setShowTutorial(false)}
+                     className="w-full mt-8 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl uppercase tracking-widest transition-colors"
+                  >
+                     Ready to Battle
+                  </button>
+               </motion.div>
+            </motion.div>
+         )}
       </AnimatePresence>
 
       {/* Top Bar for Tutorial Button */}
