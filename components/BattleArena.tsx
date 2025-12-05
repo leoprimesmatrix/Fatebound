@@ -102,7 +102,7 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
   useEffect(() => {
     if (gameState.player.mana > prevPlayerMana.current) {
         setManaGainAnim(true);
-        setTimeout(() => setManaGainAnim(false), 1000);
+        setTimeout(() => setManaGainAnim(false), 1500);
     }
     prevPlayerMana.current = gameState.player.mana;
   }, [gameState.player.mana]);
@@ -830,24 +830,31 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                     {/* Mana Gain Burst Effect */}
                     <AnimatePresence>
                         {manaGainAnim && (
-                            <motion.div 
-                                initial={{ opacity: 0.5, scale: 0.8 }}
-                                animate={{ opacity: 0, scale: 2 }}
-                                exit={{ opacity: 0 }}
-                                className="absolute inset-0 bg-blue-500 rounded-full blur-xl z-[-1]"
-                            />
+                            <>
+                              <motion.div 
+                                  initial={{ opacity: 0.8, scale: 0.9 }}
+                                  animate={{ opacity: 0, scale: 2 }}
+                                  exit={{ opacity: 0 }}
+                                  className="absolute inset-0 bg-blue-500 rounded-full blur-xl z-[-1]"
+                              />
+                              <motion.div
+                                  initial={{ scale: 1, opacity: 0.8, borderWidth: '2px' }}
+                                  animate={{ scale: 1.5, opacity: 0, borderWidth: '0px' }}
+                                  className="absolute inset-0 border-blue-400 rounded-full pointer-events-none"
+                              />
+                            </>
                         )}
                     </AnimatePresence>
                     
                     <div className="mr-1 text-xs font-bold text-blue-400 uppercase tracking-widest">Mana</div>
                     {[...Array(gameState.player.maxMana)].map((_, i) => (
-                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 ${i < gameState.player.mana ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] scale-110' : 'bg-slate-700'}`}>
+                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 relative ${i < gameState.player.mana ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] scale-110' : 'bg-slate-700'}`}>
                            {/* Individual Crystal Pulse on fill */}
                            {i === gameState.player.mana - 1 && manaGainAnim && (
                                <motion.div 
                                  initial={{ scale: 1, opacity: 1 }}
-                                 animate={{ scale: 2, opacity: 0 }}
-                                 className="w-full h-full rounded-full bg-blue-300"
+                                 animate={{ scale: 2.5, opacity: 0 }}
+                                 className="absolute inset-0 rounded-full bg-white blur-sm"
                                />
                            )}
                         </div>
