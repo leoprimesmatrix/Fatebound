@@ -92,9 +92,20 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
   const [showTurnBanner, setShowTurnBanner] = useState<'player' | 'opponent' | null>('player');
   const [hoveredCard, setHoveredCard] = useState<Card | null>(null);
   const [screenFlash, setScreenFlash] = useState<string | null>(null);
+  const [manaGainAnim, setManaGainAnim] = useState(false);
 
   const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
+  // Track mana changes for animation
+  const prevPlayerMana = useRef(gameState.player.mana);
+  useEffect(() => {
+    if (gameState.player.mana > prevPlayerMana.current) {
+        setManaGainAnim(true);
+        setTimeout(() => setManaGainAnim(false), 1000);
+    }
+    prevPlayerMana.current = gameState.player.mana;
+  }, [gameState.player.mana]);
 
   // Handle Online Incoming Data
   useEffect(() => {
@@ -815,10 +826,31 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ champion, playerDeck, 
                     </motion.div>
                  )}
 
-                 <div className="flex items-center gap-2 bg-black/60 p-3 rounded-full backdrop-blur-md border border-white/10" title="Available Mana">
+                 <div className="relative flex items-center gap-2 bg-black/60 p-3 rounded-full backdrop-blur-md border border-white/10" title="Available Mana">
+                    {/* Mana Gain Burst Effect */}
+                    <AnimatePresence>
+                        {manaGainAnim && (
+                            <motion.div 
+                                initial={{ opacity: 0.5, scale: 0.8 }}
+                                animate={{ opacity: 0, scale: 2 }}
+                                exit={{ opacity: 0 }}
+                                className="absolute inset-0 bg-blue-500 rounded-full blur-xl z-[-1]"
+                            />
+                        )}
+                    </AnimatePresence>
+                    
                     <div className="mr-1 text-xs font-bold text-blue-400 uppercase tracking-widest">Mana</div>
                     {[...Array(gameState.player.maxMana)].map((_, i) => (
-                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 ${i < gameState.player.mana ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] scale-110' : 'bg-slate-700'}`} />
+                        <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 ${i < gameState.player.mana ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)] scale-110' : 'bg-slate-700'}`}>
+                           {/* Individual Crystal Pulse on fill */}
+                           {i === gameState.player.mana - 1 && manaGainAnim && (
+                               <motion.div 
+                                 initial={{ scale: 1, opacity: 1 }}
+                                 animate={{ scale: 2, opacity: 0 }}
+                                 className="w-full h-full rounded-full bg-blue-300"
+                               />
+                           )}
+                        </div>
                     ))}
                  </div>
 
