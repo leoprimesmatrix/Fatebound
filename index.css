@@ -1,6 +1,28 @@
-/* Styles are handled by Tailwind CDN in index.html for maximum compatibility */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  background-color: #0f172a;
+  color: #f8fafc;
+}
+
 body {
   margin: 0;
-  overflow: hidden;
-  background-color: #0f172a;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1e293b; 
+}
+::-webkit-scrollbar-thumb {
+  background: #475569; 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b; 
 }
